@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Loan DApp</title>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.2/dist/ethers.umd.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    h1, h2 { color: #333; }
+    .section { margin-bottom: 20px; }
+    input, button { margin: 5px; padding: 5px; }
+    ul { list-style-type: none; }
+    li { margin: 10px 0; border: 1px solid #ccc; padding: 10px; }
+    .error { color: red; }
+  </style>
+</head>
+<body>
+  <h1>Loan DApp</h1>
+  <div id="error" class="error"></div>
+  <div class="section">
+    <h2>Create Loan</h2>
+    <input id="borrower" placeholder="Borrower Address" type="text">
+    <input id="amount" placeholder="Amount (e.g., 100)" type="number">
+    <input id="token" placeholder="Token Address" type="text" value="0x890Cb29BFc47d335949138468830146Ff2c3d20F">
+    <input id="duration" placeholder="Duration (days)" type="number">
+    <input id="interest" placeholder="Interest Percent (e.g., 5)" type="number">
+    <input id="lateFee" placeholder="Late Fee Percent (e.g., 2)" type="number">
+    <input id="installments" placeholder="Number of Installments (e.g., 3)" type="number">
+    <button onclick="createLoan()">Create Loan</button>
+  </div>
+  <div class="section">
+    <h2>Loans</h2>
+    <ul id="loans"></ul>
+  </div>
+  <div class="section">
+    <h2>Repay Loan</h2>
+    <input id="repayLoanAddress" placeholder="Loan Address" type="text">
+    <input id="repayAmount" placeholder="Repay Amount" type="number">
+    <button onclick="repayLoan()">Repay</button>
+  </div>
+  <div class="section">
+    <h2>Mark Loan as Default</h2>
+    <input id="defaultLoanAddress" placeholder="Loan Address" type="text">
+    <button onclick="markDefault()">Mark Default</button>
+  </div>
+  <div class="section">
+    <h2>Trust Score</h2>
+    <input id="trustAddress" placeholder="User Address" type="text">
+    <button onclick="getTrustScore()">Get Trust Score</button>
+    <p id="trustScore"></p>
+  </div>
+
+  <script>
+    const factoryAddress = '0xE040Fa456CDD40D7464e202397A58c1a5c92BdEe';
+    const LoanFactoryABI = [
+            {
+            "anonymous": false,
+            "inputs": [
+                {
+                "indexed": true,
+                "internalType": "address",
+                "name": "borrower",
+                "type": "address"
+                },
+                {
+                "indexed": true,
+                "internalType": "address",
+                "name": "lender",
+                "type": "address"
+                },
+                {
+                "indexed": false,
+                "internalType": "address",
+                "name": "loanAddress",
+                "type": "address"
+                }
+            ],
+            "name": "LoanCreated",
+            "type": "event"
+            },
+            {
+            "inputs": [
+                {
+                "internalType": "address",
+                "name": "_borrower",
+                "type": "address"
+                },
+                {
+                "internalType": "uint256",
+                "name": "_amount",
+                "type": "uint256"
+                },
+                {
+                "internalType": "address",
+                "name": "_token",
+                "type": "address"
+                },
+                {
+                "internalType": "uint256",
+                "name": "_duration",
+                "type": "uint256"
+                },
+                {
+                "internalType": "uint256",
+                "name": "_interestPercent",
+                "type": "uint256"
+                },
+                {
+                "internalType": "uint256",
+                "name": "_lateFeePercent",
+                "type": "uint256"
+                },
+                {
+                "internalType": "uint256",
+                "name": "_installments",
+                "type": "uint256"
+                }
+            ],
+            "name": "createLoan",
+            "outputs": [
+                {
+                "internalType": "address",
+                "name": "loanAddress",
+                "type": "address"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+            },
+            {
+            "inputs": [
+                {
+                "internalType": "address",
+                "name": "user",
+                "type": "address"
+                }
+            ],
+            "name": "getBorrowerLoans",
+            "outputs": [
+                {
+                "internalType": "address[]",
+                "name": "",
+                "type": "address[]"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [
+                {
+                "internalType": "address",
+                "name": "borrower",
+                "type": "address"
+                },
+                {
+                "internalType": "enum LoanAgreement.LoanStatus",
+                "name": "status",
+                "type": "uint8"
+                }
+            ],
+            "name": "getBorrowerLoansByStatus",
+            "outputs": [
+                {
+                "internalType": "address[]",
+                "name": "",
+                "type": "address[]"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [
+                {
+                "internalType": "address",
+                "name": "user",
+                "type": "address"
+                }
+            ],
+            "name": "getBorrowerLoansCount",
+            "outputs": [
+                {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [
+                {
+                "internalType": "address",
+                "name": "user",
+                "type": "address"
+                }
+            ],
+            "name": "getLenderLoans",
+            "outputs": [
+                {
+                "internalType": "address[]",
+                "name": "",
+                "type": "address[]"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [
+                {
+                "internalType": "address",
+                "name": "lender",
+                "type": "address"
+                },
+                {
+                "internalType": "enum LoanAgreement.LoanStatus",
+                "name": "status",
+                "type": "uint8"
+                }
+            ],
+            "name": "getLenderLoansByStatus",
+            "outputs": [
+                {
+                "internalType": "address[]",
+                "name": "",
+                "type": "address[]"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [
+                {
+                "internalType": "address",
+                "name": "user",
+                "type": "address"
+                }
+            ],
+            "name": "getLenderLoansCount",
+            "outputs": [
+                {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [],
+            "name": "getLoans",
+            "outputs": [
+                {
+                "internalType": "address[]",
+                "name": "",
+                "type": "address[]"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [],
+            "name": "getLoansCount",
+            "outputs": [
+                {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [
+                {
+                "internalType": "address",
+                "name": "_user",
+                "type": "address"
+                }
+            ],
+            "name": "getTrustScore",
+            "outputs": [
+                {
+                "internalType": "int256",
+                "name": "",
+                "type": "int256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [
+                {
+                "internalType": "address",
+                "name": "",
+                "type": "address"
+                }
+            ],
+            "name": "isValidLoan",
+            "outputs": [
+                {
+                "internalType": "bool",
+                "name": "",
+                "type": "bool"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [
+                {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+                }
+            ],
+            "name": "loans",
+            "outputs": [
+                {
+                "internalType": "address",
+                "name": "",
+                "type": "address"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [
+                {
+                "internalType": "address",
+                "name": "",
+                "type": "address"
+                },
+                {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+                }
+            ],
+            "name": "loansByBorrower",
+            "outputs": [
+                {
+                "internalType": "address",
+                "name": "",
+                "type": "address"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [
+                {
+                "internalType": "address",
+                "name": "",
+                "type": "address"
+                },
+                {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+                }
+            ],
+            "name": "loansByLender",
+            "outputs": [
+                {
+                "internalType": "address",
+                "name": "",
+                "type": "address"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [
+                {
+                "internalType": "address",
+                "name": "",
+                "type": "address"
+                }
+            ],
+            "name": "trustScores",
+            "outputs": [
+                {
+                "internalType": "int256",
+                "name": "",
+                "type": "int256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [
+                {
+                "internalType": "address",
+                "name": "_borrower",
+                "type": "address"
+                },
+                {
+                "internalType": "int256",
+                "name": "_val",
+                "type": "int256"
+                }
+            ],
+            "name": "updateTrustScore",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+            }
+        ];
+
+        const LoanAgreementABI = [
+            {
+            "inputs": [
+                {
+                "internalType": "address",
+                "name": "_lender",
+                "type": "address"
+                },
+                {
+                "internalType": "address",
+                "name": "_borrower",
+                "type": "address"
+                },
+                {
+                "internalType": "uint256",
+                "name": "_amount",
+                "type": "uint256"
+                },
+                {
+                "internalType": "address",
+                "name": "_token",
+                "type": "address"
+                },
+                {
+                "internalType": "uint256",
+                "name": "_duration",
+                "type": "uint256"
+                },
+                {
+                "internalType": "uint256",
+                "name": "_interestPercent",
+                "type": "uint256"
+                },
+                {
+                "internalType": "uint256",
+                "name": "_lateFeePercent",
+                "type": "uint256"
+                },
+                {
+                "internalType": "uint256",
+                "name": "_installments",
+                "type": "uint256"
+                },
+                {
+                "internalType": "address",
+                "name": "_factory",
+                "type": "address"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "constructor"
+            },
+            {
+            "anonymous": false,
+            "inputs": [
+                {
+                "indexed": true,
+                "internalType": "address",
+                "name": "loan",
+                "type": "address"
+                },
+                {
+                "indexed": true,
+                "internalType": "address",
+                "name": "lender",
+                "type": "address"
+                }
+            ],
+            "name": "DefaultMarked",
+            "type": "event"
+            },
+            {
+            "anonymous": false,
+            "inputs": [
+                {
+                "indexed": true,
+                "internalType": "address",
+                "name": "loan",
+                "type": "address"
+                }
+            ],
+            "name": "FullyRepaid",
+            "type": "event"
+            },
+            {
+            "anonymous": false,
+            "inputs": [
+                {
+                "indexed": true,
+                "internalType": "address",
+                "name": "payer",
+                "type": "address"
+                },
+                {
+                "indexed": false,
+                "internalType": "uint256",
+                "name": "amount",
+                "type": "uint256"
+                },
+                {
+                "indexed": false,
+                "internalType": "uint256",
+                "name": "totalRepaid",
+                "type": "uint256"
+                }
+            ],
+            "name": "Repaid",
+            "type": "event"
+            },
+            {
+            "inputs": [],
+            "name": "borrower",
+            "outputs": [
+                {
+                "internalType": "address",
+                "name": "",
+                "type": "address"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [],
+            "name": "countMissedInstallments",
+            "outputs": [
+                {
+                "internalType": "uint256",
+                "name": "missed",
+                "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [],
+            "name": "dueTimestamp",
+            "outputs": [
+                {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [],
+            "name": "factory",
+            "outputs": [
+                {
+                "internalType": "address",
+                "name": "",
+                "type": "address"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [],
+            "name": "getDueTimestamp",
+            "outputs": [
+                {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [],
+            "name": "getRepaidAmount",
+            "outputs": [
+                {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [],
+            "name": "getStatus",
+            "outputs": [
+                {
+                "internalType": "enum LoanAgreement.LoanStatus",
+                "name": "",
+                "type": "uint8"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [],
+            "name": "getTotalOwed",
+            "outputs": [
+                {
+                "internalType": "uint256",
+                "name": "totalOwed",
+                "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [],
+            "name": "installmentInterval",
+            "outputs": [
+                {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [],
+            "name": "interestPercent",
+            "outputs": [
+                {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [],
+            "name": "lateFeePercent",
+            "outputs": [
+                {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [],
+            "name": "lender",
+            "outputs": [
+                {
+                "internalType": "address",
+                "name": "",
+                "type": "address"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [],
+            "name": "markDefault",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+            },
+            {
+            "inputs": [],
+            "name": "markedDefault",
+            "outputs": [
+                {
+                "internalType": "bool",
+                "name": "",
+                "type": "bool"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [],
+            "name": "principal",
+            "outputs": [
+                {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [],
+            "name": "repaidAmount",
+            "outputs": [
+                {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [
+                {
+                "internalType": "uint256",
+                "name": "amount",
+                "type": "uint256"
+                }
+            ],
+            "name": "repay",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+            },
+            {
+            "inputs": [],
+            "name": "startTimestamp",
+            "outputs": [
+                {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [],
+            "name": "tokenAddress",
+            "outputs": [
+                {
+                "internalType": "address",
+                "name": "",
+                "type": "address"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            },
+            {
+            "inputs": [],
+            "name": "totalInstallments",
+            "outputs": [
+                {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+            }
+        ];
+
+        const MockTokenABI = [
+      {
+        "inputs": [
+          { "internalType": "address", "name": "spender", "type": "address" },
+          { "internalType": "uint256", "name": "amount", "type": "uint256" }
+        ],
+        "name": "approve",
+        "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [{ "internalType": "address", "name": "account", "type": "address" }],
+        "name": "balanceOf",
+        "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+        "stateMutability": "view",
+        "type": "function"
+      }
+    ];
+
+    let provider, signer, factoryContract, tokenContract;
+
+    async function init() {
+      if (typeof window.ethereum !== 'undefined') {
+        try {
+          provider = new ethers.BrowserProvider(window.ethereum);
+          await window.ethereum.request({ method: 'eth_requestAccounts' });
+          signer = await provider.getSigner();
+          factoryContract = new ethers.Contract(factoryAddress, LoanFactoryABI, signer);
+          tokenContract = new ethers.Contract('0x890Cb29BFc47d335949138468830146Ff2c3d20F', MockTokenABI, signer);
+          console.log("Connected to MetaMask");
+          await loadLoans();
+        } catch (error) {
+          displayError("Failed to connect to MetaMask: " + error.message);
+        }
+      } else {
+        displayError("Please install MetaMask!");
+      }
+    }
+
+    function displayError(message) {
+      document.getElementById("error").textContent = message;
+    }
+
+    async function createLoan() {
+      const borrower = document.getElementById("borrower").value;
+      const amount = document.getElementById("amount").value;
+      const token = document.getElementById("token").value;
+      const duration = document.getElementById("duration").value * 24 * 60 * 60;
+      const interest = document.getElementById("interest").value;
+      const lateFee = document.getElementById("lateFee").value;
+      const installments = document.getElementById("installments").value;
+
+      try {
+        displayError("");
+        const amountWei = ethers.parseUnits(amount, 18);
+        const approveTx = await tokenContract.approve(factoryAddress, amountWei);
+        await approveTx.wait();
+        console.log("Token approved for LoanFactory");
+        const tx = await factoryContract.createLoan(
+          borrower,
+          amountWei,
+          token,
+          duration,
+          interest,
+          lateFee,
+          installments
+        );
+        await tx.wait();
+        alert("Loan created!");
+        await loadLoans();
+      } catch (error) {
+        console.error("Create loan error:", error);
+        displayError("Error creating loan: " + error.message);
+      }
+    }
+
+    async function loadLoans() {
+      try {
+        const loansList = document.getElementById("loans");
+        if (!loansList) {
+          console.error("Loans list element not found");
+          displayError("Loans list element not found");
+          return;
+        }
+        loansList.innerHTML = "";
+        const loans = await factoryContract.getLoans();
+        for (const loanAddress of loans) {
+          try {
+            const loanContract = new ethers.Contract(loanAddress, LoanAgreementABI, signer);
+            const status = await loanContract.getStatus();
+            const statusText = ["Active", "Repaid", "Defaulted"][status.toString()];
+            const borrower = await loanContract.borrower();
+            const principal = ethers.formatUnits(await loanContract.principal(), 18);
+            const repaid = ethers.formatUnits(await loanContract.getRepaidAmount(), 18);
+            const totalOwed = ethers.formatUnits(await loanContract.getTotalOwed(), 18);
+            const missedInstallments = (await loanContract.countMissedInstallments()).toString();
+            const li = document.createElement("li");
+            li.innerHTML = `
+              Loan: ${loanAddress}<br>
+              Borrower: ${borrower}<br>
+              Principal: ${principal} MTK<br>
+              Repaid: ${repaid} MTK<br>
+              Total Owed: ${totalOwed} MTK<br>
+              Status: ${statusText}<br>
+              Missed Installments: ${missedInstallments}
+            `;
+            loansList.appendChild(li);
+          } catch (error) {
+            console.error(`Error processing loan ${loanAddress}:`, error);
+            const li = document.createElement("li");
+            li.textContent = `Error loading loan ${loanAddress}: ${error.message}`;
+            loansList.appendChild(li);
+          }
+        }
+      } catch (error) {
+        console.error("Load loans error:", error);
+        displayError("Error loading loans: " + error.message);
+      }
+    }
+
+    async function repayLoan() {
+        const loanAddress = document.getElementById("repayLoanAddress").value;
+        const amount = document.getElementById("repayAmount").value;
+
+        try {
+            displayError("");
+            const loanContract = new ethers.Contract(loanAddress, LoanAgreementABI, signer);
+            const borrower = await loanContract.borrower();
+            const userAddress = await signer.getAddress();
+            if (borrower.toLowerCase() !== userAddress.toLowerCase()) {
+            displayError("Only the borrower can repay this loan. Borrower: " + borrower);
+            return;
+            }
+            const amountWei = ethers.parseUnits(amount, 18);
+            const approveTx = await tokenContract.approve(loanAddress, amountWei);
+            await approveTx.wait();
+            const repayTx = await loanContract.repay(amountWei);
+            await repayTx.wait();
+            alert("Repayment successful!");
+            await loadLoans();
+        } catch (error) {
+            console.error("Repay error:", error);
+            displayError("Error repaying loan: " + error.message);
+        }
+    }
+
+    async function markDefault() {
+      const loanAddress = document.getElementById("defaultLoanAddress").value;
+
+      try {
+        displayError("");
+        const loanContract = new ethers.Contract(loanAddress, LoanAgreementABI, signer);
+        const tx = await loanContract.markDefault();
+        await tx.wait();
+        alert("Loan marked as default!");
+        await loadLoans();
+      } catch (error) {
+        console.error("Mark default error:", error);
+        displayError("Error marking default: " + error.message);
+      }
+    }
+
+    async function getTrustScore() {
+      const user = document.getElementById("trustAddress").value;
+      try {
+        displayError("");
+        const score = await factoryContract.getTrustScore(user);
+        document.getElementById("trustScore").textContent = `Trust Score: ${score.toString()}`;
+      } catch (error) {
+        console.error("Trust score error:", error);
+        displayError("Error getting trust score: " + error.message);
+      }
+    }
+
+    window.onload = init;
+  </script>
+</body>
+</html>
