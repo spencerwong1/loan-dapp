@@ -71,11 +71,7 @@ contract LoanAgreement {
         installmentInterval = _duration / _installments;
         factory = _factory;
         startTimestamp = block.timestamp;
-        dueTimestamp = startTimestamp + _duration;
-
-        // Transfer tokens from lender to borrower
-        IERC20 token = IERC20(_token);
-        require(token.transferFrom(_lender, _borrower, _amount), "Token transfer failed");
+        dueTimestamp = startTimestamp + _duration; // optional legacy usage
     }
 
     /// @notice         called by borrower to repay loan
