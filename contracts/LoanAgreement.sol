@@ -34,12 +34,17 @@ contract LoanAgreement {
 
     // contract state vars
     uint256 public repaidAmount;
+    uint256 public accumulatedLateFees; // PERMANENT storage for late fees
     bool public markedDefault;
+    mapping(uint256 => bool) public latePenaltyApplied; // tracks which installment periods have been penalized
 
     // events
     event Repaid(address indexed payer, uint256 amount, uint256 totalRepaid);
     event FullyRepaid(address indexed loan);
     event DefaultMarked(address indexed loan, address indexed lender);
+    event LatePaymentPenalty(address indexed borrower, uint256 installmentNumber, int256 trustScoreChange);
+    event LateFeeAccumulated(address indexed borrower, uint256 installmentNumber, uint256 lateFeeAmount, uint256 totalAccumulatedFees);
+    event RefundIssued(address indexed borrower, uint256 refundAmount);
 
     event DebugRepayment(uint256 allowance, uint256 borrowerBalance, uint256 totalOwed); // TESTING REPAYMENTS
 
@@ -79,11 +84,18 @@ contract LoanAgreement {
         dueTimestamp = startTimestamp + _duration; // optional legacy usage
     }
 
-    /// @notice         called by borrower to repay loan
+    /// @notice         called by borrower to repay loan (accepts overpayments and refunds excess)
     /// @param amount   amount to be repaid
     function repay(uint256 amount) external {
         // ensure user authorised
         require(msg.sender == borrower, "Only borrower can repay");
+
+        // Check for any late payment penalties FIRST (this updates accumulatedLateFees)
+        checkAndPenalizeLatePayments();
+
+        // Get current total owed (includes any newly accumulated late fees)
+        uint256 currentTotalOwed = getTotalOwed();
+        uint256 remainingOwed = currentTotalOwed - repaidAmount;
 
         // ensure token transfer success
         IERC20 token = IERC20(tokenAddress);
@@ -92,29 +104,51 @@ contract LoanAgreement {
         emit DebugRepayment(
             token.allowance(msg.sender, address(this)),
             token.balanceOf(msg.sender),
-            getTotalOwed()
+            currentTotalOwed
         );
 
-        // reject the transaction if overpaying
-        require(repaidAmount + amount <= getTotalOwed(), "Repayment exceeds total owed");
+        // Calculate actual payment amount and any refund needed
+        uint256 actualPayment = amount;
+        uint256 refundAmount = 0;
+        
+        if (amount > remainingOwed) {
+            // Overpayment - only take what's needed and refund the rest
+            actualPayment = remainingOwed;
+            refundAmount = amount - remainingOwed;
+        }
 
-        // require(token.transferFrom(msg.sender, lender, amount), "Token transfer failed");
-        token.safeTransferFrom(msg.sender, lender, amount);
+        // Transfer the actual payment amount to lender
+        if (actualPayment > 0) {
+            token.safeTransferFrom(msg.sender, lender, actualPayment);
+            
+            // update contract state and emit event
+            repaidAmount += actualPayment;
+            emit Repaid(msg.sender, actualPayment, repaidAmount);
+        }
 
-        // update contract state and emit event
-        repaidAmount += amount;
-        emit Repaid(msg.sender, amount, repaidAmount);
+        // Refund excess payment to borrower if any
+        if (refundAmount > 0) {
+            token.safeTransferFrom(msg.sender, borrower, refundAmount);
+            emit RefundIssued(borrower, refundAmount);
+        }
 
         // check if loan fully paid
         if (getStatus() == LoanStatus.Repaid) {
             // emit event and update borrower trust score
             emit FullyRepaid(address(this));
-            // penalize if any missed installments, reward if all on time
-            if (countMissedInstallments() > 0) {
-                _updateTrustScore(-1);
-            } else {
-                _updateTrustScore(1);
+            // Only give positive reward if no late penalties were applied
+            bool hadLatePenalties = false;
+            for (uint256 i = 1; i <= totalInstallments; i++) {
+                if (latePenaltyApplied[i]) {
+                    hadLatePenalties = true;
+                    break;
+                }
             }
+            
+            if (!hadLatePenalties) {
+                _updateTrustScore(1); // Reward for perfect payment history
+            }
+            // Note: No additional penalty here since late payments were already penalized individually
         }
     }
 
@@ -125,11 +159,14 @@ contract LoanAgreement {
         require(getStatus() == LoanStatus.Active, "Loan not active or already handled");
         require(block.timestamp > startTimestamp + (totalInstallments * installmentInterval), "Loan is not overdue yet");
 
+        // Check for any remaining late payment penalties before default
+        checkAndPenalizeLatePayments();
+
         // update contract state and emit event
         markedDefault = true;
         emit DefaultMarked(address(this), lender);
 
-        // update borrower trust score
+        // update borrower trust score with default penalty
         _updateTrustScore(-2);
     }
 
@@ -146,6 +183,91 @@ contract LoanAgreement {
         return LoanStatus.Active;
     }
 
+    /// @notice View-only function to see which payments would be penalized (no state changes)
+    function getUnpenalizedLatePayments() public view returns (uint256[] memory lateInstallments, uint256 potentialPenalties) {
+        uint256 currentTime = block.timestamp;
+        uint256 elapsedPeriods = (currentTime - startTimestamp) / installmentInterval;
+        
+        if (elapsedPeriods > totalInstallments) {
+            elapsedPeriods = totalInstallments;
+        }
+        
+        // Count potential penalties
+        uint256 count = 0;
+        for (uint256 i = 1; i <= elapsedPeriods; i++) {
+            uint256 dueTime = startTimestamp + (i * installmentInterval);
+            
+            if (currentTime > dueTime && !latePenaltyApplied[i]) {
+                uint256 totalAmountWithInterest = principal + (principal * interestPercent) / 100;
+                uint256 expectedAmountByPeriod = (totalAmountWithInterest * i) / totalInstallments;
+                
+                if (repaidAmount < expectedAmountByPeriod) {
+                    count++;
+                }
+            }
+        }
+        
+        // Build array of late installments
+        lateInstallments = new uint256[](count);
+        uint256 index = 0;
+        
+        for (uint256 i = 1; i <= elapsedPeriods; i++) {
+            uint256 dueTime = startTimestamp + (i * installmentInterval);
+            
+            if (currentTime > dueTime && !latePenaltyApplied[i]) {
+                uint256 totalAmountWithInterest = principal + (principal * interestPercent) / 100;
+                uint256 expectedAmountByPeriod = (totalAmountWithInterest * i) / totalInstallments;
+                
+                if (repaidAmount < expectedAmountByPeriod) {
+                    lateInstallments[index] = i;
+                    index++;
+                }
+            }
+        }
+        
+        potentialPenalties = count;
+    }
+
+    /// @notice Check for late payments and apply penalties (PERMANENTLY accumulates late fees)
+    function checkAndPenalizeLatePayments() public {
+        uint256 currentTime = block.timestamp;
+        uint256 elapsedPeriods = (currentTime - startTimestamp) / installmentInterval;
+        
+        // Cap at total installments
+        if (elapsedPeriods > totalInstallments) {
+            elapsedPeriods = totalInstallments;
+        }
+        
+        // Check each elapsed period for late payment penalty
+        for (uint256 i = 1; i <= elapsedPeriods; i++) {
+            uint256 dueTime = startTimestamp + (i * installmentInterval);
+            
+            // If this period is overdue and hasn't been penalized yet
+            if (currentTime > dueTime && !latePenaltyApplied[i]) {
+                // Check if payment for this period is actually missing
+                uint256 totalAmountWithInterest = principal + (principal * interestPercent) / 100;
+                uint256 expectedAmountByPeriod = (totalAmountWithInterest * i) / totalInstallments;
+                
+                if (repaidAmount < expectedAmountByPeriod) {
+                    // Calculate late fee for this specific installment
+                    uint256 installmentAmount = totalAmountWithInterest / totalInstallments;
+                    uint256 lateFeeForThisInstallment = (installmentAmount * lateFeePercent) / 100;
+                    
+                    // PERMANENTLY add late fee to accumulated total
+                    accumulatedLateFees += lateFeeForThisInstallment;
+                    
+                    // Apply late payment penalty
+                    latePenaltyApplied[i] = true;
+                    _updateTrustScore(-1);
+                    
+                    // Emit events
+                    emit LatePaymentPenalty(borrower, i, -1);
+                    emit LateFeeAccumulated(borrower, i, lateFeeForThisInstallment, accumulatedLateFees);
+                }
+            }
+        }
+    }
+
     /// @dev        internal helper to update trust score via the factory
     /// @param x    score change amount
     function _updateTrustScore(int256 x) internal {
@@ -155,27 +277,34 @@ contract LoanAgreement {
         require(success, "Trust score update failed");
     }
 
-    /// @notice calculates total amount owed including interest and late fees
-    /// @return totalOwed total amount due
+    /// @notice calculates total amount owed including interest and ACCUMULATED late fees
+    /// @return totalOwed total amount due (includes permanently accumulated late fees)
     function getTotalOwed() public view returns (uint256 totalOwed) {
+        // Base amount with interest
         totalOwed = principal + (principal * interestPercent) / 100;
-
-        uint256 missed = countMissedInstallments();
-        totalOwed += (principal * lateFeePercent * missed) / (100 * totalInstallments);
+        
+        // Add permanently accumulated late fees (these don't disappear when you catch up!)
+        totalOwed += accumulatedLateFees;
     }
 
     /// @notice calculates how many installment deadlines have passed but remain unpaid
     /// @return missed count of missed installments
     function countMissedInstallments() public view returns (uint256 missed) {
-        uint256 expectedPayments = (block.timestamp - startTimestamp) / installmentInterval;
-        if (expectedPayments > totalInstallments) expectedPayments = totalInstallments;
-
-        uint256 expectedAmount = (principal + (principal * interestPercent) / 100)
-            * expectedPayments / totalInstallments;
-
-        if (expectedAmount > repaidAmount) {
-            missed = expectedPayments - (repaidAmount * totalInstallments)
-                / (principal + (principal * interestPercent) / 100);
+        // Calculate how many installment periods have elapsed
+        uint256 elapsedPeriods = (block.timestamp - startTimestamp) / installmentInterval;
+        if (elapsedPeriods > totalInstallments) elapsedPeriods = totalInstallments;
+        
+        // Calculate total amount that should have been paid (with interest)
+        uint256 totalAmountWithInterest = principal + (principal * interestPercent) / 100;
+        uint256 expectedAmountPaid = (totalAmountWithInterest * elapsedPeriods) / totalInstallments;
+        
+        // If we haven't received the expected amount, calculate missed installments
+        if (expectedAmountPaid > repaidAmount) {
+            uint256 shortfall = expectedAmountPaid - repaidAmount;
+            uint256 installmentAmount = totalAmountWithInterest / totalInstallments;
+            
+            // Calculate missed installments (rounded up)
+            missed = (shortfall + installmentAmount - 1) / installmentAmount;
         }
     }
 

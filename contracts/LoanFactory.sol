@@ -3,11 +3,14 @@
 pragma solidity ^0.8.0;
 
 import "./LoanAgreement.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /// @title Central manager to deploy loan contracts and keep track of them
 /// @author Ethan Wong, Tony Wang
 
 contract LoanFactory {
+    using SafeERC20 for IERC20;
 
     // Storage ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     
@@ -36,6 +39,10 @@ contract LoanFactory {
         uint256 _lateFeePercent,
         uint256 _installments
     ) external returns (address loanAddress) {
+        // Transfer loan amount from lender to borrower
+        IERC20 token = IERC20(_token);
+        token.safeTransferFrom(msg.sender, _borrower, _amount);
+
         // create new instance
         LoanAgreement loan = new LoanAgreement(
             msg.sender,
