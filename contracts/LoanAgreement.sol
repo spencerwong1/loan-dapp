@@ -3,11 +3,14 @@
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
 
 /// @title Enforces loan terms such as repayment logic, timestamps, status, and trust interactions
 /// @author Ethan Wong, Tony Wang
 
 contract LoanAgreement {
+    using SafeERC20 for IERC20;
 
     // Storage //////////////////////////////////////////////////////////////
 
@@ -37,6 +40,8 @@ contract LoanAgreement {
     event Repaid(address indexed payer, uint256 amount, uint256 totalRepaid);
     event FullyRepaid(address indexed loan);
     event DefaultMarked(address indexed loan, address indexed lender);
+
+    event DebugRepayment(uint256 allowance, uint256 borrowerBalance, uint256 totalOwed); // TESTING REPAYMENTS
 
     // Functions ///////////////////////////////////////////////////////////////////////
 
@@ -80,13 +85,21 @@ contract LoanAgreement {
         // ensure user authorised
         require(msg.sender == borrower, "Only borrower can repay");
 
-        // Reject the transaction if overpaying
-        uint256 totalOwed = getTotalOwed();
-        require(repaidAmount + amount <= totalOwed, "Repayment exceeds total owed");
-
         // ensure token transfer success
         IERC20 token = IERC20(tokenAddress);
-        require(token.transferFrom(msg.sender, lender, amount), "Token transfer failed");
+
+        // debug event: check balances and allowance before transfer
+        emit DebugRepayment(
+            token.allowance(msg.sender, address(this)),
+            token.balanceOf(msg.sender),
+            getTotalOwed()
+        );
+
+        // reject the transaction if overpaying
+        require(repaidAmount + amount <= getTotalOwed(), "Repayment exceeds total owed");
+
+        // require(token.transferFrom(msg.sender, lender, amount), "Token transfer failed");
+        token.safeTransferFrom(msg.sender, lender, amount);
 
         // update contract state and emit event
         repaidAmount += amount;
