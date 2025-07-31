@@ -1,0 +1,9 @@
+version: "3.9"
+services:
+  bot:
+    build: .
+    container_name: trustfi-bot
+    env_file:
+      - .env          # RPC_URL / PAYER_PRIVATE_KEY
+    volumes:
+      - ./logs:/app/logs     # 把容器日志映射到本地 logs 目录

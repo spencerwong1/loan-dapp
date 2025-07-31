@@ -1,0 +1,31 @@
+{
+  "name": "trustfi-backend",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "scripts": {
+    "dev": "nodemon --exec ts-node src/bot.ts",
+    "build": "tsc -p .",
+    "start": "node dist/bot.js",
+    "api": "ts-node src/api/server.ts",
+    "bot": "ts-node src/bot.ts"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-ethers": "^3.1.0",
+    "@nomicfoundation/hardhat-toolbox": "^6.1.0",
+    "@openzeppelin/contracts": "^5.4.0",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.1.0",
+    "hardhat": "^2.26.1",
+    "nodemon": "^3.1.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.1",
+    "ethers": "^6.15.0",
+    "express": "^5.1.0",
+    "p-limit": "^6.2.0",
+    "winston": "^3.17.0"
+  }
+}
