@@ -97,6 +97,10 @@ contract LoanAgreement {
         uint256 currentTotalOwed = getTotalOwed();
         uint256 remainingOwed = currentTotalOwed - repaidAmount;
 
+        // cap payment amount to avoid overpayment instead of sending excess and refunding
+        uint256 actualPayment = amount > remainingOwed ? remainingOwed : amount;
+        require(actualPayment > 0, "No amount due or invalid payment");
+
         // ensure token transfer success
         IERC20 token = IERC20(tokenAddress);
 
@@ -107,30 +111,12 @@ contract LoanAgreement {
             currentTotalOwed
         );
 
-        // Calculate actual payment amount and any refund needed
-        uint256 actualPayment = amount;
-        uint256 refundAmount = 0;
-        
-        if (amount > remainingOwed) {
-            // Overpayment - only take what's needed and refund the rest
-            actualPayment = remainingOwed;
-            refundAmount = amount - remainingOwed;
-        }
-
-        // Transfer the actual payment amount to lender
-        if (actualPayment > 0) {
-            token.safeTransferFrom(msg.sender, lender, actualPayment);
+        // transfer only the capped amount
+        token.safeTransferFrom(msg.sender, lender, actualPayment);
             
-            // update contract state and emit event
-            repaidAmount += actualPayment;
-            emit Repaid(msg.sender, actualPayment, repaidAmount);
-        }
-
-        // Refund excess payment to borrower if any
-        if (refundAmount > 0) {
-            token.safeTransferFrom(msg.sender, borrower, refundAmount);
-            emit RefundIssued(borrower, refundAmount);
-        }
+        // update contract state and emit event
+        repaidAmount += actualPayment;
+        emit Repaid(msg.sender, actualPayment, repaidAmount);
 
         // check if loan fully paid
         if (getStatus() == LoanStatus.Repaid) {
